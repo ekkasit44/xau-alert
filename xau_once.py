@@ -56,40 +56,91 @@ def send_tg(text: str):
         print("Telegram error:", e)
 
 def fetch_df(candidates: list[str]) -> pd.DataFrame:
+    def _flatten(df: pd.DataFrame) -> pd.DataFrame:
+        if isinstance(df.columns, pd.MultiIndex):
+            df = df.copy()
+            df.columns = ["_".join([str(x) for x in t if x not in ("", None)]) for t in df.columns]
+        return df
+
+    def _pick(df: pd.DataFrame, key: str) -> pd.Series:
+        key = key.lower()
+        # ตรงตัวก่อน
+        for c in df.columns:
+            if str(c).lower() == key:
+                return df[c]
+        # ชื่อคอลัมน์ที่ลงท้ายด้วย key (เช่น 'GC=F_Open' หรือ 'Open_GC=F')
+        for c in df.columns:
+            s = str(c).lower()
+            if s.endswith(key):
+                return df[c]
+        # มีคำว่า key อยู่ข้างใน
+        for c in df.columns:
+            if key in str(c).lower():
+                return df[c]
+        raise KeyError(key)
+
     last_err = None
     for sym in candidates:
         try:
-            df = yf.download(sym, interval=INTERVAL, period=PERIOD,
-                             progress=False, auto_adjust=False, threads=False)
-            if df is None or df.empty:
+            # พยายามแบบ download ก่อน (บังคับ group_by="column" เพื่อลด MultiIndex แบบ ticker)
+            df0 = yf.download(
+                sym, interval=INTERVAL, period=PERIOD,
+                progress=False, auto_adjust=False, threads=False, group_by="column"
+            )
+            if df0 is None or df0.empty:
                 raise RuntimeError("empty")
-            df = df.rename(columns=str.title).reset_index()
-            # normalize columns
-            rename = {}
-            for c in df.columns:
-                lc = str(c).lower()
-                if lc == "datetime": rename[c] = "time"
-                elif lc == "date":   rename[c] = "time"
-                elif lc == "open":   rename[c] = "o"
-                elif lc == "high":   rename[c] = "h"
-                elif lc == "low":    rename[c] = "l"
-                elif lc == "close":  rename[c] = "c"
-                elif lc == "volume": rename[c] = "v"
-            df = df.rename(columns=rename)
-            for c in ["o","h","l","c","v"]:
-                if c not in df.columns: raise RuntimeError(f"missing {c}")
-                df[c] = pd.to_numeric(df[c], errors="coerce")
-            if "time" not in df.columns:
-                df.rename(columns={df.columns[0]:"time"}, inplace=True)
-            df["time"] = pd.to_datetime(df["time"], utc=True)
-            df = df.dropna().reset_index(drop=True)
-            if len(df) > BARS: df = df.tail(BARS).copy()
-            df.attrs["symbol"] = sym
-            return df
+
+            df0 = _flatten(df0).reset_index()
+
+            # normalize เป็น o/h/l/c/v + time
+            try:
+                o = _pick(df0, "open")
+                h = _pick(df0, "high")
+                l = _pick(df0, "low")
+                c = _pick(df0, "close")
+            except KeyError:
+                # บางเคสคอลัมน์เพี้ยนมาก ลอง history() อีกแบบ
+                tkr = yf.Ticker(sym)
+                dfh = tkr.history(period=PERIOD, interval=INTERVAL, auto_adjust=False)
+                if dfh is None or dfh.empty:
+                    raise RuntimeError("history empty")
+                df0 = _flatten(dfh).reset_index()
+                o = _pick(df0, "open")
+                h = _pick(df0, "high")
+                l = _pick(df0, "low")
+                c = _pick(df0, "close")
+
+            try:
+                v = _pick(df0, "volume")
+            except KeyError:
+                # ไม่มี volume ก็สร้างศูนย์ให้
+                v = pd.Series([0]*len(df0), index=df0.index, name="Volume")
+
+            out = pd.DataFrame({"o": o, "h": h, "l": l, "c": c, "v": v})
+            # หา column เวลา
+            if "Datetime" in df0.columns:
+                out.insert(0, "time", pd.to_datetime(df0["Datetime"], utc=True))
+            elif "Date" in df0.columns:
+                out.insert(0, "time", pd.to_datetime(df0["Date"], utc=True))
+            else:
+                out.insert(0, "time", pd.to_datetime(df0.iloc[:, 0], utc=True))
+
+            # ทำความสะอาด
+            for col in ["o", "h", "l", "c", "v"]:
+                out[col] = pd.to_numeric(out[col], errors="coerce")
+            out = out.dropna().reset_index(drop=True)
+            if len(out) > BARS:
+                out = out.tail(BARS).copy()
+
+            out.attrs["symbol"] = sym
+            return out
+
         except Exception as e:
             last_err = e
             print(f"[fetch] {sym} failed: {e}")
+
     raise RuntimeError(f"all candidates failed: {last_err}")
+
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
@@ -152,4 +203,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
