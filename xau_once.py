@@ -44,11 +44,15 @@ except:
 
 def send_tg(text: str):
     try:
-        requests.post(
+        r = requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            data={"chat_id": TG_CHAT, "text": text}
+            data={"chat_id": TG_CHAT, "text": text},
+            timeout=(5, 10)  # (connect timeout, read timeout) วินาที
         )
-    except Exception as e:
+        r.raise_for_status()  # ถ้า HTTP != 200 จะ throw error ให้จับด้านล่าง
+    except requests.Timeout:
+        print("Telegram timeout: connect/read เกินกำหนดเวลา")
+    except requests.RequestException as e:
         print("Telegram error:", e)
 
 def fetch_df(candidates: list[str]) -> pd.DataFrame:
@@ -148,3 +152,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
