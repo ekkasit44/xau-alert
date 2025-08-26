@@ -2,23 +2,30 @@ name: XAU 5m alert
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # รันทุก 5 นาที (เวลามาตรฐานคือ UTC)
-  workflow_dispatch:        # กด Run เองได้จากแท็บ Actions
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force Telegram test (1 = send test)"
+        required: false
+        default: "0"
+
+concurrency:
+  group: xau-alert
+  cancel-in-progress: true
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - run: pip install -r requirements.txt
-
       - name: Run once
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT:  ${{ secrets.TG_CHAT }}
+          FORCE_ALERT: ${{ github.event.inputs.force }}
         run: python xau_once.py
