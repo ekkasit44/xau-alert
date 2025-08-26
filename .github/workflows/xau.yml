@@ -2,8 +2,12 @@ name: XAU 5m alert
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch: {}   # เปิดให้กด Run เองได้
+    - cron: "*/5 * * * *"   # รันทุก 5 นาที (UTC)
+  workflow_dispatch: {}      # ยังอนุญาตกด Run เองได้ (ไม่ส่งข้อความเทสแล้ว)
+
+concurrency:
+  group: xau-alert
+  cancel-in-progress: true
 
 jobs:
   run:
@@ -14,24 +18,6 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-
-      # ✅ ส่งข้อความทดสอบทันที (เฉพาะเวลาคุณกด Run workflow)
-      - name: Send Telegram test (manual run only)
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT:  ${{ secrets.TG_CHAT }}
-        run: |
-          python - <<'PY'
-          import os,requests
-          r = requests.post(
-              f"https://api.telegram.org/bot{os.environ['TG_TOKEN']}/sendMessage",
-              data={'chat_id': os.environ['TG_CHAT'], 'text': '✅ Test from GitHub Actions'},
-              timeout=(5,10)
-          )
-          print(r.status_code, r.text)
-          PY
-
       - name: Run once
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
