@@ -1,0 +1,7 @@
+pandas
+yfinance
+ta
+requests
+tzdata
+
+
